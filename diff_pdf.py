@@ -223,71 +223,71 @@ class MainWindow(QMainWindow):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         main_layout = QVBoxLayout(main_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0);
+        main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
         toolbar = QHBoxLayout()
-        toolbar.setContentsMargins(5, 5, 5, 5);
+        toolbar.setContentsMargins(5, 5, 5, 5)
         toolbar.setSpacing(10)
 
-        self.btn_f1 = QPushButton("File 1");
+        self.btn_f1 = QPushButton("File 1")
         self.btn_f1.clicked.connect(lambda: self.open_file(1))
-        self.lbl_f1 = DroppableLabel(1);
-        self.lbl_f1.setText("(Drop PDF)");
+        self.lbl_f1 = DroppableLabel(1)
+        self.lbl_f1.setText("(Drop PDF)")
         self.lbl_f1.file_dropped.connect(self.load_file_path)
         self.lbl_f1.setStyleSheet("border:1px dashed #aaa; padding:2px; color:gray")
 
-        self.btn_f2 = QPushButton("File 2");
+        self.btn_f2 = QPushButton("File 2")
         self.btn_f2.clicked.connect(lambda: self.open_file(2))
-        self.lbl_f2 = DroppableLabel(2);
-        self.lbl_f2.setText("(Drop PDF)");
+        self.lbl_f2 = DroppableLabel(2)
+        self.lbl_f2.setText("(Drop PDF)")
         self.lbl_f2.file_dropped.connect(self.load_file_path)
         self.lbl_f2.setStyleSheet("border:1px dashed #aaa; padding:2px; color:gray")
 
-        self.mode = QComboBox();
-        self.mode.addItems(["Visual Diff", "Text Diff"]);
+        self.mode = QComboBox()
+        self.mode.addItems(["Visual Diff", "Text Diff"])
         self.mode.currentIndexChanged.connect(self.refresh_full)
 
-        self.btn_prev = QPushButton("◀");
-        self.btn_prev.setFixedWidth(30);
+        self.btn_prev = QPushButton("◀")
+        self.btn_prev.setFixedWidth(30)
         self.btn_prev.clicked.connect(self.prev_page)
-        self.lbl_page = QLabel("0/0");
-        self.lbl_page.setFixedWidth(50);
+        self.lbl_page = QLabel("0/0")
+        self.lbl_page.setFixedWidth(50)
         self.lbl_page.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.btn_next = QPushButton("▶");
-        self.btn_next.setFixedWidth(30);
+        self.btn_next = QPushButton("▶")
+        self.btn_next.setFixedWidth(30)
         self.btn_next.clicked.connect(self.next_page)
 
-        self.btn_zout = QPushButton("-");
-        self.btn_zout.setFixedWidth(30);
+        self.btn_zout = QPushButton("-")
+        self.btn_zout.setFixedWidth(30)
         self.btn_zout.clicked.connect(self.zoom_out)
-        self.spin_zoom = QSpinBox();
-        self.spin_zoom.setRange(10, 500);
-        self.spin_zoom.setSingleStep(10);
+        self.spin_zoom = QSpinBox()
+        self.spin_zoom.setRange(10, 500)
+        self.spin_zoom.setSingleStep(10)
         self.spin_zoom.setValue(100)
-        self.spin_zoom.setSuffix("%");
-        self.spin_zoom.setFixedWidth(70);
+        self.spin_zoom.setSuffix("%")
+        self.spin_zoom.setFixedWidth(70)
         self.spin_zoom.setKeyboardTracking(False)
         self.spin_zoom.valueChanged.connect(self.on_zoom_change)
-        self.btn_zin = QPushButton("+");
-        self.btn_zin.setFixedWidth(30);
+        self.btn_zin = QPushButton("+")
+        self.btn_zin.setFixedWidth(30)
         self.btn_zin.clicked.connect(self.zoom_in)
 
-        self.btn_fit = QPushButton("Fit");
-        self.btn_fit.setCheckable(True);
+        self.btn_fit = QPushButton("Fit")
+        self.btn_fit.setCheckable(True)
         self.btn_fit.clicked.connect(self.toggle_fit)
 
-        self.lbl_op = QLabel("Opacity:");
-        self.spin_op = QSpinBox();
+        self.lbl_op = QLabel("Opacity:")
+        self.spin_op = QSpinBox()
         self.spin_op.setRange(0, 100);
         self.spin_op.setValue(30)
-        self.spin_op.setSuffix("%");
-        self.spin_op.setFixedWidth(60);
+        self.spin_op.setSuffix("%")
+        self.spin_op.setFixedWidth(60)
         self.spin_op.valueChanged.connect(self.refresh_view)
 
-        self.btn_cmp = QPushButton("COMPARE");
+        self.btn_cmp = QPushButton("COMPARE")
         self.btn_cmp.setStyleSheet("background:#2196F3;color:white;font-weight:bold")
-        self.btn_cmp.clicked.connect(self.refresh_full);
+        self.btn_cmp.clicked.connect(self.refresh_full)
         self.btn_cmp.setEnabled(False)
 
         widgets = [self.btn_f1, self.lbl_f1, QLabel("|"), self.btn_f2, self.lbl_f2, (None, 1),
@@ -301,27 +301,27 @@ class MainWindow(QMainWindow):
             else:
                 toolbar.addWidget(w)
 
-        top_con = QWidget();
-        top_con.setLayout(toolbar);
+        top_con = QWidget()
+        top_con.setLayout(toolbar)
         top_con.setFixedHeight(50)
         top_con.setStyleSheet("background:#f0f0f0; border-bottom:1px solid #ccc")
         main_layout.addWidget(top_con)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.scr1 = ZoomableScrollArea();
-        self.view1 = DroppableLabel(1);
+        self.scr1 = ZoomableScrollArea()
+        self.view1 = DroppableLabel(1)
         self.view1.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.view1.file_dropped.connect(self.load_file_path);
+        self.view1.file_dropped.connect(self.load_file_path)
         self.scr1.setWidget(self.view1)
 
-        self.scr2 = ZoomableScrollArea();
-        self.view2 = DroppableLabel(2);
+        self.scr2 = ZoomableScrollArea()
+        self.view2 = DroppableLabel(2)
         self.view2.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.view2.file_dropped.connect(self.load_file_path);
+        self.view2.file_dropped.connect(self.load_file_path)
         self.scr2.setWidget(self.view2)
 
-        splitter.addWidget(self.scr1);
-        splitter.addWidget(self.scr2);
+        splitter.addWidget(self.scr1)
+        splitter.addWidget(self.scr2)
         splitter.setSizes([700, 700])
         main_layout.addWidget(splitter)
 
@@ -329,7 +329,7 @@ class MainWindow(QMainWindow):
         self.scr2.verticalScrollBar().valueChanged.connect(self.scr1.verticalScrollBar().setValue)
         self.scr1.horizontalScrollBar().valueChanged.connect(self.scr2.horizontalScrollBar().setValue)
         self.scr2.horizontalScrollBar().valueChanged.connect(self.scr1.horizontalScrollBar().setValue)
-        self.scr1.zoom_signal.connect(self.handle_wheel_zoom);
+        self.scr1.zoom_signal.connect(self.handle_wheel_zoom)
         self.scr2.zoom_signal.connect(self.handle_wheel_zoom)
 
     def open_file(self, num):
@@ -349,7 +349,7 @@ class MainWindow(QMainWindow):
             self.btn_cmp.setEnabled(True)
             self.total_pages = min(len(self.comparator.doc1), len(self.comparator.doc2))
             self.current_page = 0
-            self.btn_fit.setChecked(False);
+            self.btn_fit.setChecked(False)
             self.spin_zoom.setValue(100)
             self.refresh_full()
 
@@ -404,7 +404,7 @@ class MainWindow(QMainWindow):
 
         if self.btn_fit.isChecked():
             scale = self.calculate_fit()
-            self.spin_zoom.blockSignals(True);
+            self.spin_zoom.blockSignals(True)
             self.spin_zoom.setValue(int(scale * 100));
             self.spin_zoom.blockSignals(False)
             self.zoom_scale = scale
