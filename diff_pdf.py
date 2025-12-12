@@ -1,5 +1,6 @@
 import sys
 import os
+import ctypes
 import fitz
 import difflib
 import numpy as np
@@ -16,6 +17,7 @@ def resource_path(relative_path):
         base_path = sys._MEIPASS
     except Exception:
         base_path = os.path.abspath(".")
+
     return os.path.join(base_path, relative_path)
 
 
@@ -426,7 +428,14 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == "__main__":
+    try:
+        myappid = 'selim.diffpdf.version.1.0.0'
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+    except ImportError:
+        pass
+
     app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon(resource_path("diff_icon.ico")))
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
