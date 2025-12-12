@@ -65,7 +65,7 @@ python diff_pdf.py
 
 ## ⚖️ 라이선스 및 저작권 (License)
 
-  * **Developer**: 오민상 프로 (세림전자 와이어하네스 개발팀)
+  * **Developer**: 오민상 프로 (세림전자 개발팀)
   * **Original Project**: Based on [ConfrontaPDF](https://github.com/lbellonda/ConfrontaPDF) (GPL v2) by Luca Bellonda & DiffPDF by Mark Summerfield.
   * **License**: GPL v2 / **Internal Use Only**
 
