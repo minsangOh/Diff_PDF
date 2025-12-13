@@ -1,441 +1,455 @@
 import sys
 import os
 import ctypes
-import fitz
+import fitz  # PyMuPDF
 import difflib
 import numpy as np
+from typing import Tuple, List, Optional
 from PIL import Image, ImageChops
+
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QFileDialog,
-                             QSplitter, QComboBox, QScrollArea, QSpinBox)
-from PyQt6.QtGui import QPixmap, QImage, QIcon, QPainter, QColor, QPen
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QRectF
+                             QSplitter, QComboBox, QScrollArea, QSpinBox, QFrame, QCheckBox)
+from PyQt6.QtGui import QPixmap, QImage, QIcon, QPainter, QColor, QCursor
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QRectF, QSize
 
 
-def resource_path(relative_path):
-    try:
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-
+# --- Utils ---
+def resource_path(relative_path: str) -> str:
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    base_path = getattr(sys, '_MEIPASS', os.path.abspath("."))
     return os.path.join(base_path, relative_path)
 
 
-class PDFComparator:
+# --- Core Logic ---
+class PDFEngine:
+    """Handles PDF loading, rendering, and visual/text comparison logic."""
+
     def __init__(self):
-        self.doc1 = None
-        self.doc2 = None
-        self.doc1_path = ""
-        self.doc2_path = ""
+        self.docs = {1: None, 2: None}
+        self.paths = {1: "", 2: ""}
         self.grid_size = 5
+        self.diff_boxes = []  # Cached diff rectangles
 
-        self.cached_diff_boxes = []
-        self.is_analyzed = False
+    def load_doc(self, slot: int, path: str) -> int:
+        self.paths[slot] = path
+        self.docs[slot] = fitz.open(path)
+        return len(self.docs[slot])
 
-    def load_file1(self, path):
-        self.doc1_path = path
-        self.doc1 = fitz.open(path)
-        self.is_analyzed = False
-        return len(self.doc1)
+    def is_ready(self) -> bool:
+        return self.docs[1] is not None and self.docs[2] is not None
 
-    def load_file2(self, path):
-        self.doc2_path = path
-        self.doc2 = fitz.open(path)
-        self.is_analyzed = False
-        return len(self.doc2)
-
-    def get_page_size(self, doc_idx, page_num):
-        doc = self.doc1 if doc_idx == 1 else self.doc2
+    def get_page_size(self, slot: int, page_num: int) -> Tuple[float, float]:
+        doc = self.docs.get(slot)
         if not doc or page_num >= len(doc):
-            return (0, 0)
+            return 0, 0
         rect = doc[page_num].rect
-        return (rect.width, rect.height)
+        return rect.width, rect.height
 
-    def analyze_visual_diff(self, page_num):
-        self.cached_diff_boxes = []
-        self.is_analyzed = True
+    def compare_visual(self, page_num: int) -> None:
+        """Calculates visual differences using NumPy optimizations."""
+        self.diff_boxes = []
+        doc1, doc2 = self.docs[1], self.docs[2]
 
-        if not self.doc1 or not self.doc2: return True
-        if page_num >= len(self.doc1) or page_num >= len(self.doc2): return False
+        if not doc1 or not doc2: return
+        if page_num >= len(doc1) or page_num >= len(doc2): return
 
-        pix1 = self.doc1[page_num].get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
-        pix2 = self.doc2[page_num].get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
+        # Render pages to pixmaps for pixel comparison
+        pix1 = doc1[page_num].get_pixmap(matrix=fitz.Matrix(1, 1))
+        pix2 = doc2[page_num].get_pixmap(matrix=fitz.Matrix(1, 1))
 
         if (pix1.width, pix1.height) != (pix2.width, pix2.height):
-            return False
+            return  # Dimension mismatch, skip heavy calculation
 
+        # Convert to PIL -> NumPy
         img1 = Image.frombytes("RGB", [pix1.width, pix1.height], pix1.samples)
         img2 = Image.frombytes("RGB", [pix2.width, pix2.height], pix2.samples)
 
         diff = ImageChops.difference(img1, img2)
         if not diff.getbbox():
-            return True
+            return  # No differences
 
-        diff_l = diff.convert("L")
-        arr = np.array(diff_l)
-        h, w = arr.shape
+        # NumPy Grid Analysis
+        diff_arr = np.array(diff.convert("L"))
+        h, w = diff_arr.shape
         grid = self.grid_size
 
+        # Padding for exact grid division
         pad_h = (grid - h % grid) % grid
         pad_w = (grid - w % grid) % grid
-        if pad_h > 0 or pad_w > 0:
-            arr = np.pad(arr, ((0, pad_h), (0, pad_w)), mode='constant', constant_values=0)
+        if pad_h or pad_w:
+            diff_arr = np.pad(diff_arr, ((0, pad_h), (0, pad_w)), mode='constant')
 
-        new_h, new_w = arr.shape
-        view = arr.reshape(new_h // grid, grid, new_w // grid, grid)
-        block_max = view.max(axis=(1, 3))
+        # Reshape to 4D blocks to find max value in each grid
+        new_h, new_w = diff_arr.shape
+        blocks = diff_arr.reshape(new_h // grid, grid, new_w // grid, grid)
+        block_max = blocks.max(axis=(1, 3))
 
-        y_indices, x_indices = np.where(block_max > 20)
+        # Filter blocks with significant difference (> 20 intensity)
+        y_idxs, x_idxs = np.where(block_max > 20)
 
-        for y_idx, x_idx in zip(y_indices, x_indices):
-            x = int(x_idx * grid)
-            y = int(y_idx * grid)
-            if x < w and y < h:
-                rw = min(grid, w - x)
-                rh = min(grid, h - y)
-                self.cached_diff_boxes.append((x, y, rw, rh))
+        for y_idx, x_idx in zip(y_idxs, x_idxs):
+            real_x, real_y = int(x_idx * grid), int(y_idx * grid)
+            if real_x < w and real_y < h:
+                self.diff_boxes.append((real_x, real_y, grid, grid))
 
-        return False
+    def compare_text(self, page_num: int) -> str:
+        if page_num >= len(self.docs[1]) or page_num >= len(self.docs[2]):
+            return "Page Range Error"
 
-    def get_rendered_pixmap(self, doc_idx, page_num, scale, opacity_percent, draw_diffs=False):
-        doc = self.doc1 if doc_idx == 1 else self.doc2
+        t1 = self.docs[1][page_num].get_text("text")
+        t2 = self.docs[2][page_num].get_text("text")
+        ratio = difflib.SequenceMatcher(None, t1, t2).ratio()
+        return f"Match: {ratio * 100:.1f}%"
+
+    def get_pixmap(self, slot: int, page_num: int, scale: float, opacity: int, show_diff: bool) -> Optional[QPixmap]:
+        doc = self.docs.get(slot)
         if not doc or page_num >= len(doc):
             return None
 
-        page = doc[page_num]
-        mat = fitz.Matrix(scale, scale)
-        pix = page.get_pixmap(matrix=mat)
-
+        # Render basic page
+        pix = doc[page_num].get_pixmap(matrix=fitz.Matrix(scale, scale))
         fmt = QImage.Format.Format_RGB888
-        qt_img = QImage(pix.samples, pix.width, pix.height, pix.stride, fmt).copy()
+        qimg = QImage(pix.samples, pix.width, pix.height, pix.stride, fmt).copy()
 
-        if draw_diffs and self.cached_diff_boxes and opacity_percent > 0:
-            painter = QPainter(qt_img)
-            color = QColor(255, 0, 0, int(opacity_percent * 2.55))
-            painter.setBrush(color)
-            painter.setPen(Qt.PenStyle.NoPen)
+        # Overlay diff boxes
+        if show_diff and self.diff_boxes and opacity > 0:
+            with QPainter(qimg) as p:
+                p.setBrush(QColor(255, 0, 0, int(opacity * 2.55)))
+                p.setPen(Qt.PenStyle.NoPen)
+                for x, y, w, h in self.diff_boxes:
+                    p.drawRect(QRectF(x * scale, y * scale, w * scale, h * scale))
 
-            for (x, y, w, h) in self.cached_diff_boxes:
-                rect = QRectF(x * scale, y * scale, w * scale, h * scale)
-                painter.drawRect(rect)
-
-            painter.end()
-
-        return QPixmap.fromImage(qt_img)
-
-    def compare_text(self, page_num):
-        if page_num >= len(self.doc1) or page_num >= len(self.doc2):
-            return False, "Page count mismatch"
-        text1 = self.doc1[page_num].get_text("text")
-        text2 = self.doc2[page_num].get_text("text")
-        matcher = difflib.SequenceMatcher(None, text1, text2)
-        ratio = matcher.ratio()
-        return ratio == 1.0, f"Match: {ratio * 100:.2f}%"
+        return QPixmap.fromImage(qimg)
 
 
-class DroppableLabel(QLabel):
+# --- Custom Widgets ---
+class FileDropLabel(QLabel):
     file_dropped = pyqtSignal(int, str)
 
-    def __init__(self, file_id, parent=None):
-        super().__init__(parent)
-        self.file_id = file_id
+    def __init__(self, slot_id: int):
+        super().__init__("(Drop PDF)")
+        self.slot_id = slot_id
         self.setAcceptDrops(True)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setStyleSheet("""
+            QLabel { border: 2px dashed #ccc; color: #888; border-radius: 4px; padding: 4px; }
+            QLabel:hover { border-color: #2196F3; color: #2196F3; }
+        """)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
-            for url in event.mimeData().urls():
-                if url.toLocalFile().lower().endswith('.pdf'):
-                    event.accept();
-                    return
-        event.ignore()
+            event.accept()
+        else:
+            event.ignore()
 
     def dropEvent(self, event):
         for url in event.mimeData().urls():
             path = url.toLocalFile()
             if path.lower().endswith('.pdf'):
-                self.file_dropped.emit(self.file_id, path);
+                self.file_dropped.emit(self.slot_id, path)
                 break
 
 
-class ZoomableScrollArea(QScrollArea):
-    zoom_signal = pyqtSignal(int)
+class SyncedScrollArea(QScrollArea):
+    zoom_request = pyqtSignal(int)  # delta
 
     def __init__(self):
         super().__init__()
         self.setWidgetResizable(True)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.last_pos = None
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._last_drag_pos = None
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.setCursor(Qt.CursorShape.ClosedHandCursor);
-            self.last_pos = event.pos()
-        super().mousePressEvent(event)
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self._last_drag_pos = e.pos()
+        super().mousePressEvent(e)
 
-    def mouseMoveEvent(self, event):
-        if self.last_pos and event.buttons() == Qt.MouseButton.LeftButton:
-            delta = event.pos() - self.last_pos
+    def mouseMoveEvent(self, e):
+        if self._last_drag_pos and e.buttons() == Qt.MouseButton.LeftButton:
+            delta = e.pos() - self._last_drag_pos
             self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
             self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
-            self.last_pos = event.pos()
-        super().mouseMoveEvent(event)
+            self._last_drag_pos = e.pos()
+        super().mouseMoveEvent(e)
 
-    def mouseReleaseEvent(self, event):
-        self.setCursor(Qt.CursorShape.OpenHandCursor);
-        self.last_pos = None
-        super().mouseReleaseEvent(event)
+    def mouseReleaseEvent(self, e):
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self._last_drag_pos = None
+        super().mouseReleaseEvent(e)
 
-    def wheelEvent(self, event):
-        if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            self.zoom_signal.emit(event.angleDelta().y());
-            event.accept();
+    def wheelEvent(self, e):
+        # 1. Ctrl + Wheel : Zoom
+        if e.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self.zoom_request.emit(e.angleDelta().y())
+            e.accept()
             return
 
-        dx, dy = event.angleDelta().x(), event.angleDelta().y()
-        if event.modifiers() == Qt.KeyboardModifier.ShiftModifier and dx == 0 and dy != 0: dx = dy; dy = 0
-        if dx != 0:
-            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - dx);
-            event.accept()
-        elif dy != 0:
-            super().wheelEvent(event)
+        # 2. Shift + Wheel : Horizontal Scroll
+        if e.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            delta = e.angleDelta().y()
+            if delta != 0:
+                h_bar = self.horizontalScrollBar()
+                h_bar.setValue(h_bar.value() - delta)
+                e.accept()
+                return
+
+        # 3. Default: Vertical Scroll
+        super().wheelEvent(e)
 
 
-class MainWindow(QMainWindow):
+# --- Main UI ---
+class DiffApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.comparator = PDFComparator()
-        self.current_page = 0
+        self.engine = PDFEngine()
+
+        # State
+        self.curr_page = 0
         self.total_pages = 0
-        self.zoom_scale = 1.0
+        self.scale = 1.0
 
-        self.zoom_timer = QTimer()
-        self.zoom_timer.setSingleShot(True)
-        self.zoom_timer.timeout.connect(self.refresh_view)
+        # Debounce timer for smooth zooming
+        self.render_timer = QTimer()
+        self.render_timer.setSingleShot(True)
+        self.render_timer.timeout.connect(self._update_render)
 
-        self.init_ui()
+        self._init_ui()
+        self._connect_signals()
 
-    def init_ui(self):
-        self.setWindowTitle("Diff PDF_SELIM")
+    def _init_ui(self):
+        self.setWindowTitle("Selim PDF Diff Tool v1.1")
         self.resize(1400, 900)
         if os.path.exists(resource_path("diff_icon.ico")):
             self.setWindowIcon(QIcon(resource_path("diff_icon.ico")))
 
-        main_widget = QWidget()
-        self.setCentralWidget(main_widget)
-        main_layout = QVBoxLayout(main_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        # Layout Containers
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        toolbar = QHBoxLayout()
-        toolbar.setContentsMargins(5, 5, 5, 5)
-        toolbar.setSpacing(10)
+        # 1. Toolbar
+        self.toolbar_widget = QWidget()
+        self.toolbar_widget.setFixedHeight(50)
+        self.toolbar_widget.setStyleSheet("background-color: #f5f5f5; border-bottom: 1px solid #ddd;")
+        tb_layout = QHBoxLayout(self.toolbar_widget)
+        tb_layout.setContentsMargins(10, 5, 10, 5)
 
-        self.btn_f1 = QPushButton("File 1")
-        self.btn_f1.clicked.connect(lambda: self.open_file(1))
-        self.lbl_f1 = DroppableLabel(1)
-        self.lbl_f1.setText("(Drop PDF)")
-        self.lbl_f1.file_dropped.connect(self.load_file_path)
-        self.lbl_f1.setStyleSheet("border:1px dashed #aaa; padding:2px; color:gray")
+        # File Loaders
+        self.btn_load1 = QPushButton("File 1")
+        self.lbl_file1 = FileDropLabel(1)
+        self.btn_load2 = QPushButton("File 2")
+        self.lbl_file2 = FileDropLabel(2)
 
-        self.btn_f2 = QPushButton("File 2")
-        self.btn_f2.clicked.connect(lambda: self.open_file(2))
-        self.lbl_f2 = DroppableLabel(2)
-        self.lbl_f2.setText("(Drop PDF)")
-        self.lbl_f2.file_dropped.connect(self.load_file_path)
-        self.lbl_f2.setStyleSheet("border:1px dashed #aaa; padding:2px; color:gray")
-
-        self.mode = QComboBox()
-        self.mode.addItems(["Visual Diff", "Text Diff"])
-        self.mode.currentIndexChanged.connect(self.refresh_full)
+        # Controls
+        self.combo_mode = QComboBox()
+        self.combo_mode.addItems(["Visual Diff", "Text Diff"])
 
         self.btn_prev = QPushButton("◀")
-        self.btn_prev.setFixedWidth(30)
-        self.btn_prev.clicked.connect(self.prev_page)
-        self.lbl_page = QLabel("0/0")
-        self.lbl_page.setFixedWidth(50)
+        self.lbl_page = QLabel("0 / 0")
+        self.lbl_page.setFixedWidth(60)
         self.lbl_page.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.btn_next = QPushButton("▶")
-        self.btn_next.setFixedWidth(30)
-        self.btn_next.clicked.connect(self.next_page)
 
-        self.btn_zout = QPushButton("-")
-        self.btn_zout.setFixedWidth(30)
-        self.btn_zout.clicked.connect(self.zoom_out)
-        self.spin_zoom = QSpinBox()
-        self.spin_zoom.setRange(10, 500)
-        self.spin_zoom.setSingleStep(10)
-        self.spin_zoom.setValue(100)
-        self.spin_zoom.setSuffix("%")
-        self.spin_zoom.setFixedWidth(70)
-        self.spin_zoom.setKeyboardTracking(False)
-        self.spin_zoom.valueChanged.connect(self.on_zoom_change)
-        self.btn_zin = QPushButton("+")
-        self.btn_zin.setFixedWidth(30)
-        self.btn_zin.clicked.connect(self.zoom_in)
+        self.zoom_spin = QSpinBox()
+        self.zoom_spin.setRange(10, 500)
+        self.zoom_spin.setValue(100)
+        self.zoom_spin.setSuffix("%")
 
-        self.btn_fit = QPushButton("Fit")
+        self.btn_fit = QPushButton("Fit Width")
         self.btn_fit.setCheckable(True)
-        self.btn_fit.clicked.connect(self.toggle_fit)
 
-        self.lbl_op = QLabel("Opacity:")
-        self.spin_op = QSpinBox()
-        self.spin_op.setRange(0, 100);
-        self.spin_op.setValue(30)
-        self.spin_op.setSuffix("%")
-        self.spin_op.setFixedWidth(60)
-        self.spin_op.valueChanged.connect(self.refresh_view)
+        self.opacity_spin = QSpinBox()
+        self.opacity_spin.setRange(0, 100)
+        self.opacity_spin.setValue(30)
+        self.opacity_spin.setSuffix("%")
 
-        self.btn_cmp = QPushButton("COMPARE")
-        self.btn_cmp.setStyleSheet("background:#2196F3;color:white;font-weight:bold")
-        self.btn_cmp.clicked.connect(self.refresh_full)
-        self.btn_cmp.setEnabled(False)
+        # Highlight Toggles (New Feature)
+        self.chk_hl1 = QCheckBox("L")
+        self.chk_hl1.setChecked(True)
+        self.chk_hl1.setToolTip("Show Highlight on Left File")
 
-        widgets = [self.btn_f1, self.lbl_f1, QLabel("|"), self.btn_f2, self.lbl_f2, (None, 1),
-                   self.mode, self.btn_cmp, QLabel("|"), self.btn_prev, self.lbl_page, self.btn_next, QLabel("|"),
-                   QLabel("Z:"), self.btn_zout, self.spin_zoom, self.btn_zin, self.btn_fit, QLabel("|"), self.lbl_op,
-                   self.spin_op]
+        self.chk_hl2 = QCheckBox("R")
+        self.chk_hl2.setChecked(True)
+        self.chk_hl2.setToolTip("Show Highlight on Right File")
 
-        for w in widgets:
-            if isinstance(w, tuple):
-                toolbar.addStretch(w[1])
-            else:
-                toolbar.addWidget(w)
+        self.btn_compare = QPushButton("RUN COMPARE")
+        self.btn_compare.setStyleSheet("background: #0078D7; color: white; font-weight: bold; padding: 4px 10px;")
+        self.btn_compare.setEnabled(False)
 
-        top_con = QWidget()
-        top_con.setLayout(toolbar)
-        top_con.setFixedHeight(50)
-        top_con.setStyleSheet("background:#f0f0f0; border-bottom:1px solid #ccc")
-        main_layout.addWidget(top_con)
+        # Assemble Toolbar
+        items = [
+            self.btn_load1, self.lbl_file1, self._sep(),
+            self.btn_load2, self.lbl_file2, (None, 1),  # Stretch
+            self.combo_mode, self._sep(),
+            self.btn_compare, self._sep(),
+            self.btn_prev, self.lbl_page, self.btn_next, self._sep(),
+            QLabel("Zoom:"), self.zoom_spin, self.btn_fit, self._sep(),
+            QLabel("Highlight:"), self.chk_hl1, self.chk_hl2, self._sep(),  # Added
+            QLabel("Opacity:"), self.opacity_spin
+        ]
 
+        for item in items:
+            if isinstance(item, tuple):
+                tb_layout.addStretch(item[1])
+            elif isinstance(item, QWidget):
+                tb_layout.addWidget(item)
+
+        layout.addWidget(self.toolbar_widget)
+
+        # 2. Split View
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.scr1 = ZoomableScrollArea()
-        self.view1 = DroppableLabel(1)
+
+        self.scroll1 = SyncedScrollArea()
+        self.view1 = QLabel()
         self.view1.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.view1.file_dropped.connect(self.load_file_path)
-        self.scr1.setWidget(self.view1)
+        self.scroll1.setWidget(self.view1)
 
-        self.scr2 = ZoomableScrollArea()
-        self.view2 = DroppableLabel(2)
+        self.scroll2 = SyncedScrollArea()
+        self.view2 = QLabel()
         self.view2.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.view2.file_dropped.connect(self.load_file_path)
-        self.scr2.setWidget(self.view2)
+        self.scroll2.setWidget(self.view2)
 
-        splitter.addWidget(self.scr1)
-        splitter.addWidget(self.scr2)
+        splitter.addWidget(self.scroll1)
+        splitter.addWidget(self.scroll2)
         splitter.setSizes([700, 700])
-        main_layout.addWidget(splitter)
+        layout.addWidget(splitter)
 
-        self.scr1.verticalScrollBar().valueChanged.connect(self.scr2.verticalScrollBar().setValue)
-        self.scr2.verticalScrollBar().valueChanged.connect(self.scr1.verticalScrollBar().setValue)
-        self.scr1.horizontalScrollBar().valueChanged.connect(self.scr2.horizontalScrollBar().setValue)
-        self.scr2.horizontalScrollBar().valueChanged.connect(self.scr1.horizontalScrollBar().setValue)
-        self.scr1.zoom_signal.connect(self.handle_wheel_zoom)
-        self.scr2.zoom_signal.connect(self.handle_wheel_zoom)
+    def _sep(self):
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.VLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        return line
 
-    def open_file(self, num):
-        f, _ = QFileDialog.getOpenFileName(self, f"File {num}", "", "PDF (*.pdf)")
-        if f: self.load_file_path(num, f)
+    def _connect_signals(self):
+        # File Loading
+        self.btn_load1.clicked.connect(lambda: self._open_file_dialog(1))
+        self.lbl_file1.file_dropped.connect(self._load_file)
+        self.btn_load2.clicked.connect(lambda: self._open_file_dialog(2))
+        self.lbl_file2.file_dropped.connect(self._load_file)
 
-    def load_file_path(self, num, path):
-        lbl = self.lbl_f1 if num == 1 else self.lbl_f2
-        loader = self.comparator.load_file1 if num == 1 else self.comparator.load_file2
-        loader(path)
-        sname = path.split('/')[-1]
-        lbl.setText(sname[:15] + "..." if len(sname) > 18 else sname)
-        lbl.setToolTip(path)
-        lbl.setStyleSheet("color:black; border:1px solid #aaa; padding:2px; font-weight:bold")
+        # Navigation & Actions
+        self.btn_compare.clicked.connect(self._refresh_comparison)
+        self.btn_prev.clicked.connect(self._prev_page)
+        self.btn_next.clicked.connect(self._next_page)
+        self.combo_mode.currentIndexChanged.connect(self._refresh_comparison)
 
-        if self.comparator.doc1 and self.comparator.doc2:
-            self.btn_cmp.setEnabled(True)
-            self.total_pages = min(len(self.comparator.doc1), len(self.comparator.doc2))
-            self.current_page = 0
-            self.btn_fit.setChecked(False)
-            self.spin_zoom.setValue(100)
-            self.refresh_full()
+        # Zoom & Display
+        self.zoom_spin.valueChanged.connect(self._on_zoom_changed)
+        self.btn_fit.clicked.connect(self._update_render)
+        self.opacity_spin.valueChanged.connect(self._update_render)
 
-    def handle_wheel_zoom(self, delta):
+        # Highlight Toggles
+        self.chk_hl1.toggled.connect(self._update_render)
+        self.chk_hl2.toggled.connect(self._update_render)
+
+        # Scroll Sync
+        s1_v, s2_v = self.scroll1.verticalScrollBar(), self.scroll2.verticalScrollBar()
+        s1_h, s2_h = self.scroll1.horizontalScrollBar(), self.scroll2.horizontalScrollBar()
+
+        s1_v.valueChanged.connect(s2_v.setValue)
+        s2_v.valueChanged.connect(s1_v.setValue)
+        s1_h.valueChanged.connect(s2_h.setValue)
+        s2_h.valueChanged.connect(s1_h.setValue)
+
+        # Zoom Sync
+        self.scroll1.zoom_request.connect(self._handle_wheel_zoom)
+        self.scroll2.zoom_request.connect(self._handle_wheel_zoom)
+
+    # --- Logic Handlers ---
+    def _open_file_dialog(self, slot: int):
+        fpath, _ = QFileDialog.getOpenFileName(self, f"Open PDF {slot}", "", "PDF (*.pdf)")
+        if fpath: self._load_file(slot, fpath)
+
+    def _load_file(self, slot: int, path: str):
+        self.engine.load_doc(slot, path)
+        lbl = self.lbl_file1 if slot == 1 else self.lbl_file2
+        lbl.setText(os.path.basename(path))
+        lbl.setStyleSheet("border: 2px solid #4CAF50; color: black; font-weight: bold;")
+
+        if self.engine.is_ready():
+            self.btn_compare.setEnabled(True)
+            self.total_pages = min(len(self.engine.docs[1]), len(self.engine.docs[2]))
+            self.curr_page = 0
+            self._refresh_comparison()
+
+    def _handle_wheel_zoom(self, delta):
         self.btn_fit.setChecked(False)
         step = 10 if delta > 0 else -10
-        val = max(10, min(500, self.spin_zoom.value() + step))
-        self.spin_zoom.blockSignals(True)
-        self.spin_zoom.setValue(val)
-        self.spin_zoom.blockSignals(False)
-        self.zoom_scale = val / 100.0
+        new_val = max(10, min(500, self.zoom_spin.value() + step))
+        self.zoom_spin.setValue(new_val)  # Triggers _on_zoom_changed
 
-        self.zoom_timer.start(100)
-
-    def on_zoom_change(self):
+    def _on_zoom_changed(self):
         self.btn_fit.setChecked(False)
-        self.refresh_view()
+        self.scale = self.zoom_spin.value() / 100.0
+        self.render_timer.start(50)  # Debounce
 
-    def zoom_in(self):
-        self.spin_zoom.stepUp()
+    def _prev_page(self):
+        if self.curr_page > 0:
+            self.curr_page -= 1
+            self._refresh_comparison()
 
-    def zoom_out(self):
-        self.spin_zoom.stepDown()
+    def _next_page(self):
+        if self.curr_page < self.total_pages - 1:
+            self.curr_page += 1
+            self._refresh_comparison()
 
-    def toggle_fit(self):
-        self.refresh_view()
+    def _refresh_comparison(self):
+        if not self.engine.is_ready(): return
+        self.lbl_page.setText(f"{self.curr_page + 1} / {self.total_pages}")
 
-    def prev_page(self):
-        if self.current_page > 0: self.current_page -= 1; self.refresh_full()
-
-    def next_page(self):
-        if self.current_page < self.total_pages - 1: self.current_page += 1; self.refresh_full()
-
-    def calculate_fit(self):
-        if not self.comparator.doc1: return 1.0
-        w, _ = self.comparator.get_page_size(1, self.current_page)
-        return (self.scr1.viewport().width() - 10) / w if w > 0 else 1.0
-
-    def refresh_full(self):
-        if not self.comparator.doc1 or not self.comparator.doc2: return
-        self.lbl_page.setText(f"{self.current_page + 1}/{self.total_pages}")
-
-        if self.mode.currentIndex() == 0:
-            is_match = self.comparator.analyze_visual_diff(self.current_page)
+        is_visual = (self.combo_mode.currentIndex() == 0)
+        if is_visual:
+            self.engine.compare_visual(self.curr_page)
         else:
-            match, msg = self.comparator.compare_text(self.current_page)
+            msg = self.engine.compare_text(self.curr_page)
+            print(msg)  # Or update a status label
 
-        self.refresh_view()
+        self._update_render()
 
-    def refresh_view(self):
-        if not self.comparator.doc1 or not self.comparator.doc2: return
+    def _update_render(self):
+        if not self.engine.is_ready(): return
 
+        # Handle Fit Width
         if self.btn_fit.isChecked():
-            scale = self.calculate_fit()
-            self.spin_zoom.blockSignals(True)
-            self.spin_zoom.setValue(int(scale * 100));
-            self.spin_zoom.blockSignals(False)
-            self.zoom_scale = scale
-        else:
-            self.zoom_scale = self.spin_zoom.value() / 100.0
+            page_w, _ = self.engine.get_page_size(1, self.curr_page)
+            view_w = self.scroll1.viewport().width() - 20
+            if page_w > 0:
+                self.scale = view_w / page_w
+                self.zoom_spin.blockSignals(True)
+                self.zoom_spin.setValue(int(self.scale * 100))
+                self.zoom_spin.blockSignals(False)
 
-        op = self.spin_op.value()
-        draw_diff = (self.mode.currentIndex() == 0)
+        opacity = self.opacity_spin.value()
+        is_visual = (self.combo_mode.currentIndex() == 0)
 
-        pix1 = self.comparator.get_rendered_pixmap(1, self.current_page, self.zoom_scale, op, draw_diff)
-        pix2 = self.comparator.get_rendered_pixmap(2, self.current_page, self.zoom_scale, op, draw_diff)
+        # Check Toggles
+        show_l = is_visual and self.chk_hl1.isChecked()
+        show_r = is_visual and self.chk_hl2.isChecked()
 
-        self.view1.setPixmap(pix1)
-        self.view2.setPixmap(pix2)
+        p1 = self.engine.get_pixmap(1, self.curr_page, self.scale, opacity, show_l)
+        p2 = self.engine.get_pixmap(2, self.curr_page, self.scale, opacity, show_r)
 
-    def resizeEvent(self, e):
-        if self.btn_fit.isChecked(): self.refresh_view()
-        super().resizeEvent(e)
+        if p1: self.view1.setPixmap(p1)
+        if p2: self.view2.setPixmap(p2)
+
+    def resizeEvent(self, event):
+        if self.btn_fit.isChecked():
+            self._update_render()
+        super().resizeEvent(event)
 
 
 if __name__ == "__main__":
     try:
-        myappid = 'selim.diffpdf.version.1.0.0'
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-    except ImportError:
+        # Taskbar icon fix for Windows
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('selim.pdfdiff.tool.1.0')
+    except:
         pass
 
     app = QApplication(sys.argv)
-    app.setWindowIcon(QIcon(resource_path("diff_icon.ico")))
-    window = MainWindow()
+    window = DiffApp()
     window.show()
     sys.exit(app.exec())
