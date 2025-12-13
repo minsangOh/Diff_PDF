@@ -1,76 +1,99 @@
- # Diff PDF\_FOR SELIM
+# Selim PDF Diff Tool (Diff PDF_FOR SELIM)
 
-**Diff PDF\_FOR SELIM**은 세림전자 개발팀의 업무 효율화를 위해 개발된 고성능 PDF 비교 솔루션입니다.
-기존 오픈소스인 **ConfrontaPDF**를 Python으로 포팅하고, **NumPy** 행렬 연산과 **렌더링 분리 구조 Lazy Rendering**를 적용하여 대용량 도면에서도 렉 없는 부드러운 비교 성능을 제공합니다.
+**Selim PDF Diff**는 세림전자 개발팀의 업무 효율화를 위해 개발된 고성능 PDF 비교 데스크탑 애플리케이션입니다.
+기존 오픈소스의 한계를 넘어, **Python(PyQt6)** 로 포팅하고 **NumPy 행렬 연산**과 **Lazy Rendering(지연 렌더링)** 기법을 독자적으로 적용하여 대용량 도면 비교 시에도 끊김 없는(Zero-Lag) 성능을 제공합니다.
 
-## 🚀 주요 기능 (Key Features)
+---
 
-### 1\. 강력한 비교 엔진
+## 🚀 핵심 기능 (Key Features)
 
-  * **Visual Diff (Box Highlight)**:
-      * 픽셀 단위로 이미지를 정밀 분석하여 차이점을 붉은색 박스로 시각화합니다.
-      * 단순 픽셀 덮어쓰기가 아닌 **반투명 박스(No Outline)** 방식을 사용하여 원본 내용을 가리지 않습니다.
-  * **Text Diff**: 텍스트 데이터를 추출하여 문자열 유사도를 분석합니다.
+### 1. 강력한 비교 엔진 (High-Performance Engine)
+* **Visual Diff (Box Highlight)**:
+    * 픽셀 단위 정밀 분석을 통해 차이점을 **붉은색 반투명 박스**로 시각화합니다.
+    * **Image Subtraction & Grid Pooling** 알고리즘을 적용하여 노이즈를 배제하고 유의미한 차이만 검출합니다.
+* **Text Diff**: 문서 내 텍스트 데이터를 추출하여 문자열 유사도(Sequence Matcher)를 분석합니다.
 
-### 2\. 압도적인 성능 최적화
+### 2. 압도적인 성능 최적화 (Optimization)
+* **분석과 렌더링의 분리 (Analysis vs Rendering Separation)**:
+    * 페이지 로드 시 **NumPy**를 활용해 단 한 번만 무거운 비교 연산을 수행하고 좌표를 캐싱합니다.
+    * 줌/패닝 시에는 캐싱된 좌표를 기반으로 가벼운 벡터 드로잉만 수행하여 500% 확대 시에도 프레임 저하가 없습니다.
+* **고속 연산**: Python의 느린 반복문을 배제하고 NumPy 벡터 연산을 활용해 픽셀 처리 속도를 약 50배 가속화했습니다.
 
-  * **분석과 렌더링의 분리 (Analysis vs Rendering Separation)**:
-      * 페이지 로드 시 **단 한 번만** 무거운 비교 연산(NumPy)을 수행하여 차이점 좌표를 캐싱합니다.
-      * 줌 인/아웃 시에는 캐싱된 좌표를 기반으로 **가벼운 벡터 드로잉**만 수행하여, 고배율 확대 시에도 끊김 없는(Zero Lag) 성능을 보장합니다.
-  * **고속 연산**: NumPy 행렬 연산을 통해 수백만 픽셀 비교 속도를 50배 이상 가속화했습니다.
+### 3. 사용자 경험 (UX/UI)
+* **Smart Sync**: 좌우 뷰어가 완벽하게 동기화되어, 한쪽을 스크롤/줌 하면 반대쪽도 동일하게 움직입니다.
+* **Drag & Drop**: 파일 열기 대화상자 없이 파일을 드래그하여 즉시 로드합니다.
+* **Overlay Control**: 하이라이트 박스의 투명도(Opacity)를 실시간으로 조절하여 원본 내용을 쉽게 확인할 수 있습니다.
 
-### 3\. 사용자 편의성 (User Experience)
-
-  * **드래그 앤 드롭 (Drag & Drop)**: 파일 열기 창 없이, PDF 파일을 화면에 끌어다 놓아 즉시 비교합니다.
-  * **스마트 줌 & 동기화**:
-      * `Ctrl + 마우스 휠`로 부드러운 확대/축소가 가능합니다.
-      * 좌우 뷰어가 완벽하게 동기화되어 한쪽을 조작하면 반대쪽도 동일하게 움직입니다.
-  * **가로 휠(Thumb Wheel)**: `Shift + 마우스 휠`로 좌우 스크롤이 가능합니다.
-  * **시인성 조절**: 하이라이트 박스의 **투명도**를 0%\~100%까지 실시간으로 조절할 수 있습니다.
+---
 
 ## 🛠 기술 스택 (Tech Stack)
 
-  * **Core Logic**: Python 3.x
-  * **GUI Framework**: PyQt6 (Custom Widgets for Drag & Zoom)
-  * **PDF Engine**: PyMuPDF (fitz)
-  * **Image Processing**: Pillow (PIL), NumPy (Matrix Operation)
-  * **Build Tool**: PyInstaller
+| Category | Technology | Usage |
+| :--- | :--- | :--- |
+| **Language** | Python 3.13 | Core Logic |
+| **GUI** | PyQt6 | User Interface (Custom Widgets) |
+| **PDF Engine** | PyMuPDF (fitz) | Rendering & Text Extraction |
+| **Data/Img** | NumPy, Pillow | Matrix Operation, Image Processing |
+| **Build** | PyInstaller | Single Executable Packaging |
 
-## 📦 설치 및 실행 (Installation)
+---
 
-### 1\. 가상환경 설정 및 라이브러리 설치
+## 📂 프로젝트 구조 (Project Structure)
 
-```bash
-# 가상환경 활성화 후
-pip install pymupdf PyQt6 pillow numpy pyinstaller
+```text
+Diff_PDF/
+├── core/
+│   └── engine.py       # PDF 로딩, NumPy 기반 이미지 비교 알고리즘
+├── ui/
+│   ├── main_window.py  # 메인 윈도우 및 이벤트 핸들러
+│   └── widgets.py      # 커스텀 위젯 (DropLabel, SyncedScrollArea)
+├── utils/
+│   └── helpers.py      # 리소스 경로 처리 (PyInstaller 대응)
+├── main.py             # 애플리케이션 엔트리 포인트
+├── Diff_PDF.spec       # PyInstaller 빌드 설정 파일
+└── requirements.txt    # 의존성 패키지 목록
 ```
 
-### 2\. 소스 코드 실행
+---
 
+# 📦 설치 및 빌드 (Installation)
+
+## 의존성 설치
+```bash
+pip install -r requirements.txt
+```
+
+## 소스 코드 실행
 ```bash
 python main.py
 ```
 
-## 💡 기술적 원리 (Algorithm Pipeline)
+## 실행파일 다운로드 경로
+https://github.com/minsangOh/Diff_PDF/releases
 
-1.  **Rasterization (래스터화)**: PyMuPDF를 사용하여 PDF 벡터 데이터를 고해상도 비트맵으로 변환합니다.
-2.  **Image Subtraction (차영상 분석)**: `Img A - Img B` 연산을 통해 픽셀 차이 맵(Difference Map)을 생성합니다.
-3.  **Grid-based Max Pooling (격자 기반 풀링)**:
-      * 이미지를 10x10 픽셀 격자로 나눕니다.
-      * **NumPy**를 사용하여 각 격자의 최대 차이값을 고속으로 계산, 임계값을 넘는 '유의미한 차이' 영역의 좌표(x, y, w, h)만 추출합니다.
-4.  **Coordinate Caching (좌표 캐싱)**:
-      * 추출된 좌표 데이터를 메모리에 저장합니다. (이미지는 메모리 해제)
-5.  **Lazy Rendering (지연 렌더링)**:
-      * 사용자가 화면을 확대/축소할 때, 저장된 좌표를 현재 배율(Scale)에 맞춰 `QPainter`로 즉시 그려냅니다. 이 방식은 메모리 사용량을 최소화하고 렌더링 속도를 극대화합니다.
+---
 
-## ⚖️ 라이선스 및 저작권 (License)
+## 💡 알고리즘 파이프라인 (Algorithm Pipeline)
+### Rasterization
+PyMuPDF로 PDF를 비트맵 이미지로 변환
 
-  * **Developer**: 오민상 프로 (세림전자 개발팀)
-  * **Original Project**: Based on [ConfrontaPDF](https://github.com/lbellonda/ConfrontaPDF) (GPL v2) by Luca Bellonda & DiffPDF by Mark Summerfield.
-  * **License**: GPL v2 / **Internal Use Only**
+### Subtraction:
+Img A - Img B 연산으로 Difference Map 생성
 
-> **Notice**: 본 프로그램은 GPL v2 라이선스를 따르는 오픈소스를 기반으로 제작되었습니다. 사내 업무용(Internal Use)으로 사용하는 경우 소스 코드 공개 의무가 없으나, 외부(타 법인 포함)로 배포 시 해당 주체에게 소스 코드를 함께 제공해야 합니다.
+### Grid Pooling (NumPy):
+이미지를 5x5 격자로 분할 후 Max Pooling 수행
 
------
+임계값을 초과하는 격자의 좌표(x, y, w, h)만 추출하여 메모리에 캐싱
 
-*Copyright © 2026 Selim Electronics Development Team. All rights reserved.*
+Lazy Drawing: QPainter를 사용하여 현재 줌 레벨에 맞춰 캐싱된 좌표에 박스를 실시간 드로잉
+
+---
+
+## ⚖️ 라이선스 (License)
+Developer: 오민상 (Selim Electronics Development Team)
+
+Base Project: Inspired by ConfrontaPDF & DiffPDF.
+
+Notice: 본 프로그램은 사내 업무용(Internal Use Only)으로 제작되었습니다.
+
+Copyright © 2026 Selim Electronics Development Team. All rights reserved.
