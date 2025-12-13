@@ -90,10 +90,10 @@ Lazy Drawing: QPainter를 사용하여 현재 줌 레벨에 맞춰 캐싱된 좌
 ---
 
 ## ⚖️ 라이선스 (License)
-Developer: 오민상 (Selim Electronics Development Team)
+Developer: 오민상
 
 Base Project: Inspired by ConfrontaPDF & DiffPDF.
 
 Notice: 본 프로그램은 사내 업무용(Internal Use Only)으로 제작되었습니다.
 
-Copyright © 2026 Selim Electronics Development Team. All rights reserved.
+Copyright © 2026 오민상. All rights reserved.
