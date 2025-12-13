@@ -48,7 +48,7 @@ pip install pymupdf PyQt6 pillow numpy pyinstaller
 ### 2\. 소스 코드 실행
 
 ```bash
-python diff_pdf.py
+python main.py
 ```
 
 ## 💡 기술적 원리 (Algorithm Pipeline)
