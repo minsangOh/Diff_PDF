@@ -48,8 +48,11 @@ class DiffApp(QMainWindow):
 
         self.btn_load1 = QPushButton("File 1")
         self.lbl_file1 = FileDropLabel(1)
+        self.lbl_file1.setFixedWidth(200)  # [Fix] 너비 고정: 창 크기 변경 방지
+
         self.btn_load2 = QPushButton("File 2")
         self.lbl_file2 = FileDropLabel(2)
+        self.lbl_file2.setFixedWidth(200)  # [Fix] 너비 고정: 창 크기 변경 방지
 
         self.combo_mode = QComboBox()
         self.combo_mode.addItems(["Visual Diff", "Text Diff"])
@@ -69,7 +72,6 @@ class DiffApp(QMainWindow):
         self.btn_fit.setCheckable(True)
 
         # --- Highlight Checkboxes Customization ---
-        # 텍스트를 Left/Right로 명확히 하고, 체크 여부에 따라 색상이 변하는 스타일 적용
         chk_style = """
             QCheckBox {
                 font-weight: bold;
@@ -190,7 +192,16 @@ class DiffApp(QMainWindow):
     def _load_file(self, slot: int, path: str):
         self.engine.load_doc(slot, path)
         lbl = self.lbl_file1 if slot == 1 else self.lbl_file2
-        lbl.setText(os.path.basename(path))
+
+        filename = os.path.basename(path)
+        lbl.setToolTip(filename)  # [Fix] 마우스 오버 시 전체 파일명 표시
+
+        # [Fix] 긴 파일명 생략 처리 (ElideMiddle: "very_long_...name.pdf")
+        metrics = lbl.fontMetrics()
+        # 라벨 너비에서 여백(20px)을 뺀 만큼만 텍스트 허용
+        elided_text = metrics.elidedText(filename, Qt.TextElideMode.ElideMiddle, lbl.width() - 20)
+        lbl.setText(elided_text)
+
         lbl.setStyleSheet("border: 2px solid #4CAF50; color: black; font-weight: bold;")
 
         if self.engine.is_ready():
@@ -205,7 +216,14 @@ class DiffApp(QMainWindow):
         path1 = self.engine.paths.get(1)
         path2 = self.engine.paths.get(2)
 
-        if path1 and path2 and path1 != path2:
+        if path1 and path2:
+            # Case 1: 물리적으로 완전히 같은 파일인 경우 (경로 일치)
+            if path1 == path2:
+                QMessageBox.warning(self, "중복 파일 감지",
+                                    "양쪽 슬롯에 완전히 동일한 파일(경로 일치)이 로드되었습니다.")
+                return
+
+            # Case 2: 경로는 다르지만 내용(Binary)이 같은 경우
             try:
                 if os.path.getsize(path1) != os.path.getsize(path2):
                     return
@@ -213,7 +231,7 @@ class DiffApp(QMainWindow):
                 with open(path1, 'rb') as f1, open(path2, 'rb') as f2:
                     if f1.read() == f2.read():
                         QMessageBox.warning(self, "중복 파일 감지",
-                                            "파일명은 다르지만 내용이 완벽하게 동일한 파일입니다.")
+                                            "파일명(경로)은 다르지만 내용이 완벽하게 동일한 파일입니다.")
             except Exception as e:
                 print(f"Duplicate check failed: {e}")
 
