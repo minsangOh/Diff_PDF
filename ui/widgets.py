@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import QLabel, QScrollArea
 from PyQt6.QtCore import Qt, pyqtSignal
 
+
 class FileDropLabel(QLabel):
     file_dropped = pyqtSignal(int, str)
 
@@ -30,12 +31,32 @@ class FileDropLabel(QLabel):
 
 class SyncedScrollArea(QScrollArea):
     zoom_request = pyqtSignal(int)  # delta
+    file_dropped = pyqtSignal(int, str)  # New: 드롭 시그널 추가
 
-    def __init__(self):
+    def __init__(self, slot_id: int = None):  # Update: slot_id 인자 추가
         super().__init__()
+        self.slot_id = slot_id
         self.setWidgetResizable(True)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self._last_drag_pos = None
+
+        # Enable Drag & Drop
+        if self.slot_id is not None:
+            self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if self.slot_id is not None and event.mimeData().hasUrls():
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        if self.slot_id is not None:
+            for url in event.mimeData().urls():
+                path = url.toLocalFile()
+                if path.lower().endswith('.pdf'):
+                    self.file_dropped.emit(self.slot_id, path)
+                    break
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:

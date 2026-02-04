@@ -1,7 +1,7 @@
 import os
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFileDialog, QSplitter,
-                             QComboBox, QSpinBox, QFrame, QCheckBox)
+                             QComboBox, QSpinBox, QFrame, QCheckBox, QMessageBox)
 from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt, QTimer
 
@@ -68,12 +68,33 @@ class DiffApp(QMainWindow):
         self.btn_fit = QPushButton("Fit Width")
         self.btn_fit.setCheckable(True)
 
-        self.chk_hl1 = QCheckBox("L")
+        # --- Highlight Checkboxes Customization ---
+        # 텍스트를 Left/Right로 명확히 하고, 체크 여부에 따라 색상이 변하는 스타일 적용
+        chk_style = """
+            QCheckBox {
+                font-weight: bold;
+                color: #888888; /* OFF 상태: 회색 */
+                spacing: 5px;
+            }
+            QCheckBox::indicator {
+                width: 16px; 
+                height: 16px;
+            }
+            QCheckBox:checked {
+                color: #0078D7; /* ON 상태: 파란색 강조 */
+            }
+        """
+
+        self.chk_hl1 = QCheckBox("Left")
         self.chk_hl1.setChecked(True)
         self.chk_hl1.setToolTip("Show Highlight on Left File")
-        self.chk_hl2 = QCheckBox("R")
+        self.chk_hl1.setStyleSheet(chk_style)
+
+        self.chk_hl2 = QCheckBox("Right")
         self.chk_hl2.setChecked(True)
         self.chk_hl2.setToolTip("Show Highlight on Right File")
+        self.chk_hl2.setStyleSheet(chk_style)
+        # ------------------------------------------
 
         self.opacity_spin = QSpinBox()
         self.opacity_spin.setRange(0, 100)
@@ -105,14 +126,19 @@ class DiffApp(QMainWindow):
 
         # Splitter Setup
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.scroll1 = SyncedScrollArea()
+
+        # Slot 1 View (Left)
+        self.scroll1 = SyncedScrollArea(1)
         self.view1 = QLabel()
         self.view1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.view1.setScaledContents(False)
         self.scroll1.setWidget(self.view1)
 
-        self.scroll2 = SyncedScrollArea()
+        # Slot 2 View (Right)
+        self.scroll2 = SyncedScrollArea(2)
         self.view2 = QLabel()
         self.view2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.view2.setScaledContents(False)
         self.scroll2.setWidget(self.view2)
 
         splitter.addWidget(self.scroll1)
@@ -129,8 +155,11 @@ class DiffApp(QMainWindow):
     def _connect_signals(self):
         self.btn_load1.clicked.connect(lambda: self._open_file_dialog(1))
         self.lbl_file1.file_dropped.connect(self._load_file)
+        self.scroll1.file_dropped.connect(self._load_file)
+
         self.btn_load2.clicked.connect(lambda: self._open_file_dialog(2))
         self.lbl_file2.file_dropped.connect(self._load_file)
+        self.scroll2.file_dropped.connect(self._load_file)
 
         self.btn_compare.clicked.connect(self._refresh_comparison)
         self.btn_prev.clicked.connect(self._prev_page)
@@ -168,7 +197,25 @@ class DiffApp(QMainWindow):
             self.btn_compare.setEnabled(True)
             self.total_pages = min(len(self.engine.docs[1]), len(self.engine.docs[2]))
             self.curr_page = 0
+
+            self._check_duplicate_files()
             self._refresh_comparison()
+
+    def _check_duplicate_files(self):
+        path1 = self.engine.paths.get(1)
+        path2 = self.engine.paths.get(2)
+
+        if path1 and path2 and path1 != path2:
+            try:
+                if os.path.getsize(path1) != os.path.getsize(path2):
+                    return
+
+                with open(path1, 'rb') as f1, open(path2, 'rb') as f2:
+                    if f1.read() == f2.read():
+                        QMessageBox.warning(self, "중복 파일 감지",
+                                            "파일명은 다르지만 내용이 완벽하게 동일한 파일입니다.")
+            except Exception as e:
+                print(f"Duplicate check failed: {e}")
 
     def _handle_wheel_zoom(self, delta):
         self.btn_fit.setChecked(False)
@@ -178,6 +225,18 @@ class DiffApp(QMainWindow):
     def _on_zoom_changed(self):
         self.btn_fit.setChecked(False)
         self.scale = self.zoom_spin.value() / 100.0
+
+        if self.engine.is_ready():
+            self.view1.setScaledContents(True)
+            self.view2.setScaledContents(True)
+
+            page_w, page_h = self.engine.get_page_size(1, self.curr_page)
+            if page_w > 0:
+                new_w = int(page_w * self.scale)
+                new_h = int(page_h * self.scale)
+                self.view1.setFixedSize(new_w, new_h)
+                self.view2.setFixedSize(new_w, new_h)
+
         self.render_timer.start(50)
 
     def _prev_page(self):
@@ -220,8 +279,15 @@ class DiffApp(QMainWindow):
         p1 = self.engine.get_pixmap(1, self.curr_page, self.scale, opacity, show_l)
         p2 = self.engine.get_pixmap(2, self.curr_page, self.scale, opacity, show_r)
 
-        if p1: self.view1.setPixmap(p1)
-        if p2: self.view2.setPixmap(p2)
+        self.view1.setScaledContents(False)
+        self.view2.setScaledContents(False)
+
+        if p1:
+            self.view1.setFixedSize(p1.width(), p1.height())
+            self.view1.setPixmap(p1)
+        if p2:
+            self.view2.setFixedSize(p2.width(), p2.height())
+            self.view2.setPixmap(p2)
 
     def resizeEvent(self, event):
         if self.btn_fit.isChecked(): self._update_render()
