@@ -1,8 +1,9 @@
 import os
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFileDialog, QSplitter,
-                             QComboBox, QSpinBox, QFrame, QCheckBox, QMessageBox)
-from PyQt6.QtGui import QIcon
+                             QComboBox, QSpinBox, QFrame, QCheckBox, QMessageBox,
+                             QApplication)  # [Update] QApplication 추가
+from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtCore import Qt, QTimer
 
 from utils.helpers import resource_path
@@ -48,11 +49,11 @@ class DiffApp(QMainWindow):
 
         self.btn_load1 = QPushButton("File 1")
         self.lbl_file1 = FileDropLabel(1)
-        self.lbl_file1.setFixedWidth(200)  # [Fix] 너비 고정: 창 크기 변경 방지
+        self.lbl_file1.setFixedWidth(200)
 
         self.btn_load2 = QPushButton("File 2")
         self.lbl_file2 = FileDropLabel(2)
-        self.lbl_file2.setFixedWidth(200)  # [Fix] 너비 고정: 창 크기 변경 방지
+        self.lbl_file2.setFixedWidth(200)
 
         self.combo_mode = QComboBox()
         self.combo_mode.addItems(["Visual Diff", "Text Diff"])
@@ -107,6 +108,16 @@ class DiffApp(QMainWindow):
         self.btn_compare.setStyleSheet("background: #0078D7; color: white; font-weight: bold; padding: 4px 10px;")
         self.btn_compare.setEnabled(False)
 
+        # [Capture Button]
+        self.btn_capture = QPushButton("📷 Capture")
+        self.btn_capture.setStyleSheet("padding: 4px 8px; font-weight: bold;")
+        self.btn_capture.setToolTip("Save current view as Image")
+
+        # [New] Clipboard Copy Button
+        self.btn_clipboard = QPushButton("📋 Copy")
+        self.btn_clipboard.setStyleSheet("padding: 4px 8px; font-weight: bold;")
+        self.btn_clipboard.setToolTip("Copy current view to Clipboard")
+
         items = [
             self.btn_load1, self.lbl_file1, self._sep(),
             self.btn_load2, self.lbl_file2, (None, 1),
@@ -115,7 +126,9 @@ class DiffApp(QMainWindow):
             self.btn_prev, self.lbl_page, self.btn_next, self._sep(),
             QLabel("Zoom:"), self.zoom_spin, self.btn_fit, self._sep(),
             QLabel("Highlight:"), self.chk_hl1, self.chk_hl2, self._sep(),
-            QLabel("Opacity:"), self.opacity_spin
+            QLabel("Opacity:"), self.opacity_spin, self._sep(),
+            self.btn_capture,
+            self.btn_clipboard  # Add to toolbar
         ]
 
         for item in items:
@@ -127,7 +140,7 @@ class DiffApp(QMainWindow):
         layout.addWidget(self.toolbar_widget)
 
         # Splitter Setup
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # Slot 1 View (Left)
         self.scroll1 = SyncedScrollArea(1)
@@ -143,10 +156,10 @@ class DiffApp(QMainWindow):
         self.view2.setScaledContents(False)
         self.scroll2.setWidget(self.view2)
 
-        splitter.addWidget(self.scroll1)
-        splitter.addWidget(self.scroll2)
-        splitter.setSizes([700, 700])
-        layout.addWidget(splitter)
+        self.splitter.addWidget(self.scroll1)
+        self.splitter.addWidget(self.scroll2)
+        self.splitter.setSizes([700, 700])
+        layout.addWidget(self.splitter)
 
     def _sep(self):
         line = QFrame()
@@ -174,6 +187,9 @@ class DiffApp(QMainWindow):
         self.chk_hl1.toggled.connect(self._update_render)
         self.chk_hl2.toggled.connect(self._update_render)
 
+        self.btn_capture.clicked.connect(self._capture_screen)
+        self.btn_clipboard.clicked.connect(self._copy_to_clipboard)  # [New] Connect Signal
+
         s1_v, s2_v = self.scroll1.verticalScrollBar(), self.scroll2.verticalScrollBar()
         s1_h, s2_h = self.scroll1.horizontalScrollBar(), self.scroll2.horizontalScrollBar()
         s1_v.valueChanged.connect(s2_v.setValue)
@@ -194,11 +210,9 @@ class DiffApp(QMainWindow):
         lbl = self.lbl_file1 if slot == 1 else self.lbl_file2
 
         filename = os.path.basename(path)
-        lbl.setToolTip(filename)  # [Fix] 마우스 오버 시 전체 파일명 표시
+        lbl.setToolTip(filename)
 
-        # [Fix] 긴 파일명 생략 처리 (ElideMiddle: "very_long_...name.pdf")
         metrics = lbl.fontMetrics()
-        # 라벨 너비에서 여백(20px)을 뺀 만큼만 텍스트 허용
         elided_text = metrics.elidedText(filename, Qt.TextElideMode.ElideMiddle, lbl.width() - 20)
         lbl.setText(elided_text)
 
@@ -217,13 +231,11 @@ class DiffApp(QMainWindow):
         path2 = self.engine.paths.get(2)
 
         if path1 and path2:
-            # Case 1: 물리적으로 완전히 같은 파일인 경우 (경로 일치)
             if path1 == path2:
                 QMessageBox.warning(self, "중복 파일 감지",
                                     "양쪽 슬롯에 완전히 동일한 파일(경로 일치)이 로드되었습니다.")
                 return
 
-            # Case 2: 경로는 다르지만 내용(Binary)이 같은 경우
             try:
                 if os.path.getsize(path1) != os.path.getsize(path2):
                     return
@@ -234,6 +246,28 @@ class DiffApp(QMainWindow):
                                             "파일명(경로)은 다르지만 내용이 완벽하게 동일한 파일입니다.")
             except Exception as e:
                 print(f"Duplicate check failed: {e}")
+
+    def _capture_screen(self):
+        filename, _ = QFileDialog.getSaveFileName(self, "Save Screenshot", "compare_result.png",
+                                                  "PNG Files (*.png);;JPEG Files (*.jpg)")
+        if filename:
+            try:
+                screenshot = self.splitter.grab()
+                if not filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    filename += '.png'
+                screenshot.save(filename)
+                QMessageBox.information(self, "Success", f"Screenshot saved to:\n{filename}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to save screenshot:\n{str(e)}")
+
+    # [New] Copy to Clipboard Logic
+    def _copy_to_clipboard(self):
+        try:
+            screenshot = self.splitter.grab()
+            QApplication.clipboard().setPixmap(screenshot)
+            QMessageBox.information(self, "Success", "Current view copied to clipboard!")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to copy to clipboard:\n{str(e)}")
 
     def _handle_wheel_zoom(self, delta):
         self.btn_fit.setChecked(False)
