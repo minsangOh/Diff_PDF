@@ -2,13 +2,13 @@ import os
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFileDialog, QSplitter,
                              QComboBox, QSpinBox, QFrame, QCheckBox, QMessageBox,
-                             QApplication)  # [Update] QApplication 추가
-from PyQt6.QtGui import QIcon, QPixmap
+                             QApplication)
+from PyQt6.QtGui import QIcon, QPixmap, QCursor
 from PyQt6.QtCore import Qt, QTimer
 
 from utils.helpers import resource_path
 from core.engine import PDFEngine
-from ui.widgets import FileDropLabel, SyncedScrollArea
+from ui.widgets import SyncedScrollArea  # [Update] FileDropLabel 제거
 
 
 class DiffApp(QMainWindow):
@@ -28,9 +28,15 @@ class DiffApp(QMainWindow):
         self._init_ui()
         self._connect_signals()
 
+        # [Fix] 100ms 딜레이 후 위치 보정
+        QTimer.singleShot(100, self._center_on_active_screen)
+
     def _init_ui(self):
         self.setWindowTitle("Selim PDF Diff Tool v1.1")
-        self.resize(1400, 900)
+
+        # 초기 안전 크기
+        self.resize(1000, 700)
+
         if os.path.exists(resource_path("diff_icon.ico")):
             self.setWindowIcon(QIcon(resource_path("diff_icon.ico")))
 
@@ -47,16 +53,15 @@ class DiffApp(QMainWindow):
         tb_layout = QHBoxLayout(self.toolbar_widget)
         tb_layout.setContentsMargins(10, 5, 10, 5)
 
-        self.btn_load1 = QPushButton("File 1")
-        self.lbl_file1 = FileDropLabel(1)
-        self.lbl_file1.setFixedWidth(200)
+        # [UX Update] DropLabel 제거 및 버튼만 유지
+        self.btn_load1 = QPushButton("File 1 (Open)")
+        self.btn_load1.setFixedWidth(150)  # 너비 약간 확보
 
-        self.btn_load2 = QPushButton("File 2")
-        self.lbl_file2 = FileDropLabel(2)
-        self.lbl_file2.setFixedWidth(200)
+        self.btn_load2 = QPushButton("File 2 (Open)")
+        self.btn_load2.setFixedWidth(150)
 
         self.combo_mode = QComboBox()
-        self.combo_mode.addItems(["Visual Diff", "Text Diff"])
+        self.combo_mode.addItems(["Visual Diff"])
 
         self.btn_prev = QPushButton("◀")
         self.lbl_page = QLabel("0 / 0")
@@ -76,7 +81,7 @@ class DiffApp(QMainWindow):
         chk_style = """
             QCheckBox {
                 font-weight: bold;
-                color: #888888; /* OFF 상태: 회색 */
+                color: #888888;
                 spacing: 5px;
             }
             QCheckBox::indicator {
@@ -84,7 +89,7 @@ class DiffApp(QMainWindow):
                 height: 16px;
             }
             QCheckBox:checked {
-                color: #0078D7; /* ON 상태: 파란색 강조 */
+                color: #0078D7;
             }
         """
 
@@ -104,31 +109,25 @@ class DiffApp(QMainWindow):
         self.opacity_spin.setValue(30)
         self.opacity_spin.setSuffix("%")
 
-        self.btn_compare = QPushButton("RUN COMPARE")
-        self.btn_compare.setStyleSheet("background: #0078D7; color: white; font-weight: bold; padding: 4px 10px;")
-        self.btn_compare.setEnabled(False)
-
-        # [Capture Button]
         self.btn_capture = QPushButton("📷 Capture")
         self.btn_capture.setStyleSheet("padding: 4px 8px; font-weight: bold;")
         self.btn_capture.setToolTip("Save current view as Image")
 
-        # [New] Clipboard Copy Button
         self.btn_clipboard = QPushButton("📋 Copy")
         self.btn_clipboard.setStyleSheet("padding: 4px 8px; font-weight: bold;")
         self.btn_clipboard.setToolTip("Copy current view to Clipboard")
 
+        # [UX Update] Toolbar Items 재구성 (라벨 제거)
         items = [
-            self.btn_load1, self.lbl_file1, self._sep(),
-            self.btn_load2, self.lbl_file2, (None, 1),
+            self.btn_load1, self._sep(),
+            self.btn_load2, (None, 1),  # Spacer
             self.combo_mode, self._sep(),
-            self.btn_compare, self._sep(),
             self.btn_prev, self.lbl_page, self.btn_next, self._sep(),
             QLabel("Zoom:"), self.zoom_spin, self.btn_fit, self._sep(),
             QLabel("Highlight:"), self.chk_hl1, self.chk_hl2, self._sep(),
             QLabel("Opacity:"), self.opacity_spin, self._sep(),
             self.btn_capture,
-            self.btn_clipboard  # Add to toolbar
+            self.btn_clipboard
         ]
 
         for item in items:
@@ -142,17 +141,30 @@ class DiffApp(QMainWindow):
         # Splitter Setup
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
 
+        # [UX Update] 뷰어 초기 상태 설정 (Drop 안내 문구)
+        placeholder_style = """
+            QLabel {
+                color: #aaaaaa;
+                font-size: 24px;
+                font-weight: bold;
+                border: 3px dashed #e0e0e0;
+                background-color: #fafafa;
+            }
+        """
+
         # Slot 1 View (Left)
         self.scroll1 = SyncedScrollArea(1)
-        self.view1 = QLabel()
+        self.view1 = QLabel("Drop PDF Here\n(File 1)")
         self.view1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.view1.setStyleSheet(placeholder_style)
         self.view1.setScaledContents(False)
         self.scroll1.setWidget(self.view1)
 
         # Slot 2 View (Right)
         self.scroll2 = SyncedScrollArea(2)
-        self.view2 = QLabel()
+        self.view2 = QLabel("Drop PDF Here\n(File 2)")
         self.view2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.view2.setStyleSheet(placeholder_style)
         self.view2.setScaledContents(False)
         self.scroll2.setWidget(self.view2)
 
@@ -160,6 +172,42 @@ class DiffApp(QMainWindow):
         self.splitter.addWidget(self.scroll2)
         self.splitter.setSizes([700, 700])
         layout.addWidget(self.splitter)
+
+    # ... (기존 _center_on_active_screen, _sep 등 유지) ...
+    def _center_on_active_screen(self):
+        cursor_pos = QCursor.pos()
+        screen = QApplication.screenAt(cursor_pos)
+        if not screen:
+            screen = QApplication.primaryScreen()
+        if not screen: return
+
+        avail_geo = screen.availableGeometry()
+
+        max_w = avail_geo.width() - 50
+        max_h = avail_geo.height() - 50
+        target_w = int(avail_geo.width() * 0.7)
+        target_h = int(avail_geo.height() * 0.7)
+
+        target_w = max(1000, min(target_w, max_w))
+        target_h = max(700, min(target_h, max_h))
+
+        self.resize(target_w, target_h)
+
+        center_x = avail_geo.x() + (avail_geo.width() - target_w) // 2
+        center_y = avail_geo.y() + (avail_geo.height() - target_h) // 2
+        self.move(center_x, center_y)
+
+        frame_geo = self.frameGeometry()
+        if frame_geo.right() > avail_geo.right():
+            offset = frame_geo.right() - avail_geo.right()
+            self.move(self.x() - offset, self.y())
+        if frame_geo.bottom() > avail_geo.bottom():
+            offset = frame_geo.bottom() - avail_geo.bottom()
+            self.move(self.x(), self.y() - offset)
+        if self.x() < avail_geo.x():
+            self.move(avail_geo.x(), self.y())
+        if self.y() < avail_geo.y():
+            self.move(self.x(), avail_geo.y())
 
     def _sep(self):
         line = QFrame()
@@ -169,14 +217,13 @@ class DiffApp(QMainWindow):
 
     def _connect_signals(self):
         self.btn_load1.clicked.connect(lambda: self._open_file_dialog(1))
-        self.lbl_file1.file_dropped.connect(self._load_file)
+        # [Update] lbl_file1 시그널 제거 (객체가 삭제됨)
         self.scroll1.file_dropped.connect(self._load_file)
 
         self.btn_load2.clicked.connect(lambda: self._open_file_dialog(2))
-        self.lbl_file2.file_dropped.connect(self._load_file)
+        # [Update] lbl_file2 시그널 제거 (객체가 삭제됨)
         self.scroll2.file_dropped.connect(self._load_file)
 
-        self.btn_compare.clicked.connect(self._refresh_comparison)
         self.btn_prev.clicked.connect(self._prev_page)
         self.btn_next.clicked.connect(self._next_page)
         self.combo_mode.currentIndexChanged.connect(self._refresh_comparison)
@@ -188,7 +235,7 @@ class DiffApp(QMainWindow):
         self.chk_hl2.toggled.connect(self._update_render)
 
         self.btn_capture.clicked.connect(self._capture_screen)
-        self.btn_clipboard.clicked.connect(self._copy_to_clipboard)  # [New] Connect Signal
+        self.btn_clipboard.clicked.connect(self._copy_to_clipboard)
 
         s1_v, s2_v = self.scroll1.verticalScrollBar(), self.scroll2.verticalScrollBar()
         s1_h, s2_h = self.scroll1.horizontalScrollBar(), self.scroll2.horizontalScrollBar()
@@ -207,24 +254,39 @@ class DiffApp(QMainWindow):
 
     def _load_file(self, slot: int, path: str):
         self.engine.load_doc(slot, path)
-        lbl = self.lbl_file1 if slot == 1 else self.lbl_file2
 
+        # [UX Update] 버튼 텍스트에 파일명 표시
         filename = os.path.basename(path)
-        lbl.setToolTip(filename)
+        btn = self.btn_load1 if slot == 1 else self.btn_load2
 
-        metrics = lbl.fontMetrics()
-        elided_text = metrics.elidedText(filename, Qt.TextElideMode.ElideMiddle, lbl.width() - 20)
-        lbl.setText(elided_text)
+        btn.setToolTip(filename)
+        metrics = btn.fontMetrics()
+        # 버튼 너비에 맞춰 텍스트 줄임 (...)
+        elided_text = metrics.elidedText(filename, Qt.TextElideMode.ElideMiddle, btn.width() - 20)
+        btn.setText(elided_text)
 
-        lbl.setStyleSheet("border: 2px solid #4CAF50; color: black; font-weight: bold;")
+        # 버튼 스타일 강조 (로드됨 표시)
+        btn.setStyleSheet("border: 2px solid #4CAF50; color: #4CAF50; font-weight: bold;")
+
+        # [UX Fix] 파일 하나만 로드돼도 일단 보여주기 위해 조건 완화
+        # 기존: if self.engine.is_ready(): ...
+        # 변경: 일단 렌더링 시도 (is_ready가 아니면 비교만 안함)
+
+        # 전체 페이지 수는 둘 다 로드되었을 때만 계산 가능 (아니면 현재 로드된 것 기준)
+        doc1_len = len(self.engine.docs[1]) if self.engine.docs[1] else 0
+        doc2_len = len(self.engine.docs[2]) if self.engine.docs[2] else 0
 
         if self.engine.is_ready():
-            self.btn_compare.setEnabled(True)
-            self.total_pages = min(len(self.engine.docs[1]), len(self.engine.docs[2]))
+            self.total_pages = min(doc1_len, doc2_len)
             self.curr_page = 0
-
             self._check_duplicate_files()
             self._refresh_comparison()
+        else:
+            # 하나만 로드된 상태라도 보여주기
+            self.total_pages = max(doc1_len, doc2_len)
+            self.curr_page = 0
+            self.lbl_page.setText(f"{self.curr_page + 1} / {self.total_pages}")
+            self._update_render()  # 강제 렌더링 호출
 
     def _check_duplicate_files(self):
         path1 = self.engine.paths.get(1)
@@ -260,7 +322,6 @@ class DiffApp(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to save screenshot:\n{str(e)}")
 
-    # [New] Copy to Clipboard Logic
     def _copy_to_clipboard(self):
         try:
             screenshot = self.splitter.grab()
@@ -278,31 +339,45 @@ class DiffApp(QMainWindow):
         self.btn_fit.setChecked(False)
         self.scale = self.zoom_spin.value() / 100.0
 
-        if self.engine.is_ready():
-            self.view1.setScaledContents(True)
-            self.view2.setScaledContents(True)
+        # [Update] is_ready() 체크 제거 -> 개별 파일만 있어도 줌 가능하게
+        self.view1.setScaledContents(True)
+        self.view2.setScaledContents(True)
 
-            page_w, page_h = self.engine.get_page_size(1, self.curr_page)
-            if page_w > 0:
-                new_w = int(page_w * self.scale)
-                new_h = int(page_h * self.scale)
-                self.view1.setFixedSize(new_w, new_h)
-                self.view2.setFixedSize(new_w, new_h)
+        page_w, page_h = self.engine.get_page_size(1, self.curr_page)
+        # 1번 없으면 2번 크기라도 참조
+        if page_w == 0:
+            page_w, page_h = self.engine.get_page_size(2, self.curr_page)
+
+        if page_w > 0:
+            new_w = int(page_w * self.scale)
+            new_h = int(page_h * self.scale)
+            self.view1.setFixedSize(new_w, new_h)
+            self.view2.setFixedSize(new_w, new_h)
 
         self.render_timer.start(50)
 
     def _prev_page(self):
         if self.curr_page > 0:
             self.curr_page -= 1
-            self._refresh_comparison()
+            if self.engine.is_ready():
+                self._refresh_comparison()
+            else:
+                self.lbl_page.setText(f"{self.curr_page + 1} / {self.total_pages}")
+                self._update_render()
 
     def _next_page(self):
         if self.curr_page < self.total_pages - 1:
             self.curr_page += 1
-            self._refresh_comparison()
+            if self.engine.is_ready():
+                self._refresh_comparison()
+            else:
+                self.lbl_page.setText(f"{self.curr_page + 1} / {self.total_pages}")
+                self._update_render()
 
     def _refresh_comparison(self):
+        # [Update] 비교 로직은 둘 다 있을 때만 실행
         if not self.engine.is_ready(): return
+
         self.lbl_page.setText(f"{self.curr_page + 1} / {self.total_pages}")
 
         if self.combo_mode.currentIndex() == 0:
@@ -312,10 +387,13 @@ class DiffApp(QMainWindow):
         self._update_render()
 
     def _update_render(self):
-        if not self.engine.is_ready(): return
+        # [Update] is_ready 체크 제거 -> 개별 파일 렌더링 허용
+        # if not self.engine.is_ready(): return
 
         if self.btn_fit.isChecked():
             page_w, _ = self.engine.get_page_size(1, self.curr_page)
+            if page_w == 0: page_w, _ = self.engine.get_page_size(2, self.curr_page)
+
             view_w = self.scroll1.viewport().width() - 20
             if page_w > 0:
                 self.scale = view_w / page_w
@@ -328,16 +406,21 @@ class DiffApp(QMainWindow):
         show_l = is_visual and self.chk_hl1.isChecked()
         show_r = is_visual and self.chk_hl2.isChecked()
 
+        # Engine.get_pixmap은 문서가 없으면 None을 리턴하므로 안전함
         p1 = self.engine.get_pixmap(1, self.curr_page, self.scale, opacity, show_l)
         p2 = self.engine.get_pixmap(2, self.curr_page, self.scale, opacity, show_r)
 
         self.view1.setScaledContents(False)
         self.view2.setScaledContents(False)
 
+        # Pixmap이 있으면 이미지 표시, 없으면 Drop 안내 유지
         if p1:
+            self.view1.setStyleSheet("")  # 테두리 제거
             self.view1.setFixedSize(p1.width(), p1.height())
             self.view1.setPixmap(p1)
+
         if p2:
+            self.view2.setStyleSheet("")  # 테두리 제거
             self.view2.setFixedSize(p2.width(), p2.height())
             self.view2.setPixmap(p2)
 
